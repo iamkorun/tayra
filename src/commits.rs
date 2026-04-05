@@ -47,6 +47,7 @@ impl CommitType {
 
 /// A parsed conventional commit.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ParsedCommit {
     pub commit_type: CommitType,
     pub scope: Option<String>,

@@ -122,6 +122,7 @@ impl VersionTag {
     }
 
     /// Format the next version with the same prefix style as this tag.
+    #[allow(dead_code)]
     pub fn format_next(&self, next: &SemVer) -> String {
         if self.has_v_prefix {
             format!("v{next}")
