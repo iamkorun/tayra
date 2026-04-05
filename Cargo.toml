@@ -1,0 +1,10 @@
+[package]
+name = "tayra"
+version = "0.1.0"
+edition = "2024"
+description = "Smart semver bumper — reads your git commits, suggests the next version"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+git2 = "0.20"
