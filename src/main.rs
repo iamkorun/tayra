@@ -34,10 +34,7 @@ struct Cli {
 fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
     let result = git_ops::analyze(&cli.path)?;
 
-    let prefix = git_ops::detect_prefix(
-        result.current_version.as_ref(),
-        cli.prefix.as_deref(),
-    );
+    let prefix = git_ops::detect_prefix(result.current_version.as_ref(), cli.prefix.as_deref());
 
     if cli.ci {
         println!("{}", output::format_ci(&result, prefix));

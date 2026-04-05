@@ -1,6 +1,6 @@
 use git2::{Oid, Repository, Sort};
 
-use crate::commits::{parse_commit, ParsedCommit};
+use crate::commits::{ParsedCommit, parse_commit};
 use crate::version::VersionTag;
 
 /// Error type for git operations.

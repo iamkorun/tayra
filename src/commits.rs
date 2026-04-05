@@ -68,10 +68,7 @@ impl ParsedCommit {
 
     /// Short summary for display (first line of commit).
     pub fn summary(&self) -> &str {
-        self.raw_message
-            .lines()
-            .next()
-            .unwrap_or(&self.raw_message)
+        self.raw_message.lines().next().unwrap_or(&self.raw_message)
     }
 }
 
@@ -80,8 +77,8 @@ pub fn parse_commit(message: &str) -> ParsedCommit {
     let first_line = message.lines().next().unwrap_or(message).trim();
     let body = message.lines().skip(1).collect::<Vec<_>>().join("\n");
 
-    let is_breaking_in_body = body.contains("BREAKING CHANGE:")
-        || body.contains("BREAKING-CHANGE:");
+    let is_breaking_in_body =
+        body.contains("BREAKING CHANGE:") || body.contains("BREAKING-CHANGE:");
 
     // Try to parse conventional commit format: type(scope)!: description
     if let Some(parsed) = try_parse_conventional(first_line, &body, is_breaking_in_body) {
@@ -139,7 +136,7 @@ fn try_parse_conventional(
 
 /// Parse the prefix part before the colon.
 /// Returns (type, optional scope, has_bang).
-fn parse_prefix(prefix: &str) -> Option<(& str, Option<String>, bool)> {
+fn parse_prefix(prefix: &str) -> Option<(&str, Option<String>, bool)> {
     let prefix = prefix.trim();
 
     if prefix.is_empty() {
@@ -282,10 +279,7 @@ mod tests {
 
     #[test]
     fn compute_bump_only_fixes() {
-        let commits = vec![
-            parse_commit("fix: bug1"),
-            parse_commit("fix: bug2"),
-        ];
+        let commits = vec![parse_commit("fix: bug1"), parse_commit("fix: bug2")];
         assert_eq!(compute_bump(&commits), BumpLevel::Patch);
     }
 

@@ -45,10 +45,7 @@ pub fn format_full(result: &AnalysisResult, prefix: &str) -> String {
     ));
 
     if !result.commits.is_empty() {
-        output.push_str(&format!(
-            "\nCommits since {}:\n",
-            current_display
-        ));
+        output.push_str(&format!("\nCommits since {}:\n", current_display));
         for commit in &result.commits {
             let summary = commit.summary().trim_end();
             output.push_str(&format!("  {summary}\n"));
@@ -118,7 +115,7 @@ pub fn compute_suggested(result: &AnalysisResult) -> SemVer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commits::{parse_commit, ParsedCommit};
+    use crate::commits::{ParsedCommit, parse_commit};
     use crate::version::VersionTag;
 
     fn make_result(tag: Option<&str>, messages: &[&str]) -> AnalysisResult {
