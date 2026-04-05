@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>tayra — Smart semver bumper for git repos</title>
+  <meta name="description" content="tayra reads your git commits since the last version tag and suggests the correct semver bump. Zero config. Pure Rust. CI-ready." />
+  <meta property="og:title" content="tayra — Smart semver bumper" />
+  <meta property="og:description" content="Reads your git commits, suggests the next version. Zero config. Pure Rust." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://iamkorun.github.io/tayra" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="tayra — Smart semver bumper" />
+  <meta name="twitter:description" content="Reads your git commits, suggests the next version. Zero config. Pure Rust." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    body { background-color: #0d0d1a; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+
+    .gradient-text {
+      background: linear-gradient(135deg, #a78bfa 0%, #34d399 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .glow-purple { box-shadow: 0 0 40px rgba(139, 92, 246, 0.15); }
+
+    .terminal-window {
+      background: #0a0a14;
+      border: 1px solid rgba(139, 92, 246, 0.2);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .terminal-bar {
+      background: #111126;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+    }
+
+    .terminal-dot { width: 12px; height: 12px; border-radius: 50%; }
+
+    .copy-btn {
+      transition: all 0.2s ease;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: transparent;
+    }
+    .copy-btn:hover { background-color: rgba(139, 92, 246, 0.15); color: #fff; border-color: rgba(167,139,250,0.4); }
+    .copy-btn:active { transform: scale(0.97); }
+    .copy-btn.copied { color: #34d399; border-color: rgba(52,211,153,0.4); }
+
+    .feature-card {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.05) 0%, rgba(52, 211, 153, 0.03) 100%);
+      border: 1px solid rgba(139, 92, 246, 0.15);
+      transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+    }
+    .feature-card:hover {
+      border-color: rgba(139, 92, 246, 0.4);
+      box-shadow: 0 4px 30px rgba(139, 92, 246, 0.1);
+      transform: translateY(-2px);
+    }
+
+    .badge-tag {
+      background: rgba(139, 92, 246, 0.12);
+      border: 1px solid rgba(139, 92, 246, 0.25);
+      color: #a78bfa;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-10px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .anim-fade-up  { animation: fadeUp 0.5s ease-out forwards; }
+    .anim-fade-in  { animation: fadeIn 0.4s ease-out forwards; }
+    .anim-slide-in { animation: slideIn 0.4s ease-out forwards; }
+    .opacity-0     { opacity: 0; }
+
+    .commit-line { opacity: 0; animation: slideIn 0.4s ease-out forwards; }
+    .bump-result { opacity: 0; animation: fadeUp 0.5s ease-out 1.8s forwards; }
+
+    .d1 { animation-delay: 0.1s; }
+    .d2 { animation-delay: 0.3s; }
+    .d3 { animation-delay: 0.5s; }
+    .d4 { animation-delay: 0.7s; }
+    .d5 { animation-delay: 0.9s; }
+    .d6 { animation-delay: 1.1s; }
+    .d7 { animation-delay: 1.3s; }
+
+    .scroll-reveal {
+      opacity: 0;
+      transform: translateY(16px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+    .scroll-reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav style="position:fixed;top:0;left:0;right:0;z-index:50;background:rgba(13,13,26,0.88);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,0.05);">
+    <div style="max-width:960px;margin:0 auto;padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;">
+      <span style="font-family:'JetBrains Mono',monospace;font-weight:600;color:#fff;font-size:0.875rem;letter-spacing:-0.01em;">🦡 tayra</span>
+      <div style="display:flex;align-items:center;gap:20px;">
+        <a href="#features" style="color:#94a3b8;font-size:0.875rem;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#94a3b8'">Features</a>
+        <a href="#demo"     style="color:#94a3b8;font-size:0.875rem;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#94a3b8'">Demo</a>
+        <a href="#install"  style="color:#94a3b8;font-size:0.875rem;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#94a3b8'">Install</a>
+        <a href="https://github.com/iamkorun/tayra" target="_blank" rel="noopener"
+           style="display:flex;align-items:center;gap:6px;font-size:0.875rem;font-weight:500;padding:6px 12px;border-radius:6px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#cbd5e1;text-decoration:none;transition:all 0.2s;"
+           onmouseover="this.style.background='rgba(255,255,255,0.1)';this.style.color='#fff'" onmouseout="this.style.background='rgba(255,255,255,0.05)';this.style.color='#cbd5e1'">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.021c0 4.428 2.865 8.185 6.839 9.504.5.092.682-.217.682-.482 0-.237-.009-.868-.014-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844a9.59 9.59 0 012.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.021C22 6.484 17.522 2 12 2z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section style="padding:128px 24px 96px;text-align:center;background:radial-gradient(ellipse 80% 50% at 50% -10%, rgba(139,92,246,0.12) 0%, transparent 70%);">
+    <div style="max-width:720px;margin:0 auto;">
+      <div style="display:inline-flex;align-items:center;gap:8px;padding:4px 12px;border-radius:999px;background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.25);color:#a78bfa;font-size:0.72rem;font-weight:500;margin-bottom:32px;">
+        <span style="width:6px;height:6px;border-radius:50%;background:#34d399;display:inline-block;"></span>
+        Built in Rust &middot; Zero config &middot; CI-ready
+      </div>
+
+      <div class="opacity-0 anim-fade-up" style="font-size:64px;margin-bottom:12px;animation-delay:0s;">🦡</div>
+
+      <h1 class="opacity-0 anim-fade-up" style="font-size:clamp(2.5rem,6vw,4rem);font-weight:700;letter-spacing:-0.03em;color:#fff;margin:0 0 20px;animation-delay:0.1s;">
+        <span class="gradient-text">tayra</span>
+      </h1>
+
+      <p class="opacity-0 anim-fade-up" style="font-size:1.2rem;color:#94a3b8;max-width:480px;margin:0 auto 40px;line-height:1.6;animation-delay:0.2s;">
+        Reads your git commits since the last tag.<br>Tells you exactly what to bump — and why.
+      </p>
+
+      <!-- Install block -->
+      <div id="install" class="opacity-0 anim-fade-up" style="max-width:420px;margin:0 auto;animation-delay:0.3s;">
+        <div class="terminal-window glow-purple">
+          <div class="terminal-bar">
+            <div class="terminal-dot" style="background:#ff5f57;"></div>
+            <div class="terminal-dot" style="background:#febc2e;"></div>
+            <div class="terminal-dot" style="background:#28c840;"></div>
+            <span style="margin-left:auto;font-size:0.7rem;color:#475569;font-family:'JetBrains Mono',monospace;">install</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;gap:16px;">
+            <code style="font-family:'JetBrains Mono',monospace;font-size:0.9rem;color:#34d399;flex:1;text-align:left;user-select:all;" id="install-cmd">cargo install tayra</code>
+            <button class="copy-btn" id="copy-install-btn" onclick="copyInstall()" type="button" aria-label="Copy install command">
+              <svg id="copy-svg" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+              </svg>
+              <span id="copy-label">copy</span>
+            </button>
+          </div>
+        </div>
+        <p class="opacity-0 anim-fade-in" style="margin-top:12px;font-size:0.75rem;color:#475569;animation-delay:0.6s;">
+          Requires Rust &middot; <a href="https://rustup.rs" target="_blank" rel="noopener" style="color:#a78bfa;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">rustup.rs</a>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Demo -->
+  <section id="demo" style="padding:80px 24px;">
+    <div style="max-width:640px;margin:0 auto;">
+      <h2 style="font-size:1.5rem;font-weight:600;color:#fff;text-align:center;margin-bottom:40px;">See it in action</h2>
+
+      <!-- Full output -->
+      <div class="terminal-window glow-purple scroll-reveal">
+        <div class="terminal-bar">
+          <div class="terminal-dot" style="background:#ff5f57;"></div>
+          <div class="terminal-dot" style="background:#febc2e;"></div>
+          <div class="terminal-dot" style="background:#28c840;"></div>
+          <span style="margin-left:12px;font-size:0.75rem;color:#64748b;font-family:'JetBrains Mono',monospace;">~/my-project</span>
+        </div>
+        <div style="padding:20px 24px;font-family:'JetBrains Mono',monospace;font-size:0.85rem;line-height:1.8;">
+          <div class="commit-line d1"><span style="color:#475569;">$</span> <span style="color:#fff;">tayra</span></div>
+          <div class="commit-line d2" style="color:#64748b;">tayra v0.1.0</div>
+          <div class="commit-line d2" style="color:#7c3aed;">━━━━━━━━━━━━━━━━━━━━━</div>
+          <div class="commit-line d3"><span style="color:#64748b;">Current version:</span> <span style="color:#e2e8f0;">v1.4.2</span></div>
+          <div class="commit-line d4"><span style="color:#64748b;">Suggested bump: </span> <span style="color:#fbbf24;">minor</span> <span style="color:#475569;"> → </span><span style="color:#34d399;font-weight:600;">v1.5.0</span></div>
+          <div class="commit-line d5" style="margin-top:8px;color:#475569;">Commits since v1.4.2:</div>
+          <div class="commit-line d5"><span style="color:#64748b;margin-left:16px;">feat(auth):</span> <span style="color:#cbd5e1;">add OAuth2 support</span></div>
+          <div class="commit-line d6"><span style="color:#64748b;margin-left:16px;">fix:</span> <span style="color:#cbd5e1;">handle empty token correctly</span></div>
+          <div class="commit-line d6"><span style="color:#64748b;margin-left:16px;">chore:</span> <span style="color:#cbd5e1;">update dependencies</span></div>
+          <div class="commit-line d7"><span style="color:#64748b;margin-left:16px;">docs:</span> <span style="color:#cbd5e1;">expand API reference</span></div>
+          <div class="bump-result" style="margin-top:8px;"><span style="color:#475569;">Breakdown:</span> <span style="color:#a78bfa;">1 feat</span><span style="color:#475569;">, 1 fix, 1 chore, 1 docs → </span><span style="color:#fbbf24;">minor</span></div>
+        </div>
+      </div>
+
+      <!-- CI mode -->
+      <div class="terminal-window scroll-reveal" style="margin-top:24px;">
+        <div class="terminal-bar">
+          <div class="terminal-dot" style="background:#ff5f57;"></div>
+          <div class="terminal-dot" style="background:#febc2e;"></div>
+          <div class="terminal-dot" style="background:#28c840;"></div>
+          <span style="margin-left:12px;font-size:0.75rem;color:#64748b;font-family:'JetBrains Mono',monospace;">CI mode — machine-readable output</span>
+        </div>
+        <div style="padding:20px 24px;font-family:'JetBrains Mono',monospace;font-size:0.85rem;line-height:1.8;">
+          <div><span style="color:#475569;">$</span> <span style="color:#fff;">tayra --ci</span></div>
+          <div style="color:#34d399;font-weight:600;">v1.5.0</div>
+          <div style="margin-top:8px;"><span style="color:#475569;">$</span> <span style="color:#94a3b8;">git tag $(tayra --ci) &amp;&amp; git push --tags</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" style="padding:80px 24px;background:radial-gradient(ellipse 60% 40% at 50% 50%, rgba(52,211,153,0.04) 0%, transparent 70%);">
+    <div style="max-width:960px;margin:0 auto;">
+      <h2 style="font-size:1.5rem;font-weight:600;color:#fff;text-align:center;margin-bottom:48px;">Everything you need. Nothing you don't.</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;">
+
+        <div class="feature-card scroll-reveal" style="border-radius:12px;padding:24px;">
+          <div style="font-size:1.75rem;margin-bottom:12px;">📖</div>
+          <h3 style="font-weight:600;color:#fff;margin:0 0 8px;font-size:1rem;">Reads Conventional Commits</h3>
+          <p style="color:#64748b;font-size:0.875rem;line-height:1.6;margin:0;">
+            Parses <code class="badge-tag">feat</code> <code class="badge-tag">fix</code> <code class="badge-tag">chore</code> <code class="badge-tag">docs</code> <code class="badge-tag">refactor</code> and more.
+            Detects breaking changes via <code class="badge-tag">!</code> or <code class="badge-tag">BREAKING CHANGE:</code>.
+          </p>
+        </div>
+
+        <div class="feature-card scroll-reveal" style="border-radius:12px;padding:24px;">
+          <div style="font-size:1.75rem;margin-bottom:12px;">🤖</div>
+          <h3 style="font-weight:600;color:#fff;margin:0 0 8px;font-size:1rem;">Built for CI/CD</h3>
+          <p style="color:#64748b;font-size:0.875rem;line-height:1.6;margin:0;">
+            <code class="badge-tag">--ci</code> outputs just the version string. Drop it into GitHub Actions, GitLab CI, or any shell script with zero friction.
+          </p>
+        </div>
+
+        <div class="feature-card scroll-reveal" style="border-radius:12px;padding:24px;">
+          <div style="font-size:1.75rem;margin-bottom:12px;">🏷️</div>
+          <h3 style="font-weight:600;color:#fff;margin:0 0 8px;font-size:1rem;">Auto-detects tag style</h3>
+          <p style="color:#64748b;font-size:0.875rem;line-height:1.6;margin:0;">
+            Using <code class="badge-tag">v1.2.3</code> or bare <code class="badge-tag">1.2.3</code>? tayra detects your prefix and preserves it. Override anytime with <code class="badge-tag">--prefix</code>.
+          </p>
+        </div>
+
+        <div class="feature-card scroll-reveal" style="border-radius:12px;padding:24px;">
+          <div style="font-size:1.75rem;margin-bottom:12px;">⚡</div>
+          <h3 style="font-weight:600;color:#fff;margin:0 0 8px;font-size:1rem;">Zero config, instant</h3>
+          <p style="color:#64748b;font-size:0.875rem;line-height:1.6;margin:0;">
+            No YAML, no <code class="badge-tag">.tayrarc</code>, no setup. Run <code class="badge-tag">tayra</code> in any git repo and get an answer in milliseconds.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Bump rules table -->
+  <section style="padding:64px 24px;">
+    <div style="max-width:640px;margin:0 auto;">
+      <h2 style="font-size:1.5rem;font-weight:600;color:#fff;text-align:center;margin-bottom:40px;">How bumps are decided</h2>
+      <div class="terminal-window scroll-reveal">
+        <div class="terminal-bar">
+          <span style="font-size:0.7rem;color:#475569;font-family:'JetBrains Mono',monospace;">bump rules</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:0.82rem;">
+          <thead>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+              <th style="text-align:left;padding:12px 20px;color:#475569;font-weight:500;">Commit type</th>
+              <th style="text-align:left;padding:12px 20px;color:#475569;font-weight:500;">Bump</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+              <td style="padding:12px 20px;color:#64748b;"><code>fix: &nbsp;chore: &nbsp;docs: &nbsp;refactor: &nbsp;...</code></td>
+              <td style="padding:12px 20px;color:#60a5fa;">patch</td>
+            </tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+              <td style="padding:12px 20px;color:#64748b;"><code>feat:</code></td>
+              <td style="padding:12px 20px;color:#fbbf24;">minor</td>
+            </tr>
+            <tr>
+              <td style="padding:12px 20px;color:#64748b;"><code>feat!: &nbsp;fix!: &nbsp;BREAKING CHANGE:</code></td>
+              <td style="padding:12px 20px;color:#f87171;">major</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="padding:12px 20px;border-top:1px solid rgba(255,255,255,0.05);font-size:0.72rem;color:#334155;font-family:'JetBrains Mono',monospace;">
+          Highest bump level across all commits since last tag wins.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section style="padding:96px 24px;text-align:center;background:radial-gradient(ellipse 60% 50% at 50% 100%, rgba(139,92,246,0.1) 0%, transparent 70%);">
+    <div style="max-width:480px;margin:0 auto;">
+      <div style="font-size:48px;margin-bottom:16px;" class="scroll-reveal">🦡</div>
+      <h2 class="scroll-reveal" style="font-size:2rem;font-weight:700;color:#fff;margin:0 0 16px;">Stop guessing versions.</h2>
+      <p class="scroll-reveal" style="color:#64748b;margin:0 0 32px;">tayra reads your commits and tells you the answer.</p>
+      <div class="scroll-reveal" style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;">
+        <a href="https://github.com/iamkorun/tayra" target="_blank" rel="noopener"
+           style="display:inline-flex;align-items:center;gap:8px;padding:12px 24px;border-radius:8px;font-weight:600;color:#fff;text-decoration:none;background:linear-gradient(135deg,#7c3aed,#5b21b6);box-shadow:0 4px 20px rgba(124,58,237,0.3);transition:box-shadow 0.2s;"
+           onmouseover="this.style.boxShadow='0 4px 30px rgba(124,58,237,0.5)'"
+           onmouseout="this.style.boxShadow='0 4px 20px rgba(124,58,237,0.3)'">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.477 2 2 6.484 2 12.021c0 4.428 2.865 8.185 6.839 9.504.5.092.682-.217.682-.482 0-.237-.009-.868-.014-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844a9.59 9.59 0 012.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.021C22 6.484 17.522 2 12 2z"/></svg>
+          Star on GitHub
+        </a>
+        <a href="https://buymeacoffee.com/iamkorun" target="_blank" rel="noopener"
+           style="display:inline-flex;align-items:center;gap:8px;padding:12px 24px;border-radius:8px;font-weight:600;color:#cbd5e1;text-decoration:none;border:1px solid rgba(255,255,255,0.1);transition:all 0.2s;"
+           onmouseover="this.style.color='#fbbf24';this.style.borderColor='rgba(251,191,36,0.4)'"
+           onmouseout="this.style.color='#cbd5e1';this.style.borderColor='rgba(255,255,255,0.1)'">
+          ☕ Buy me a coffee
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer style="border-top:1px solid rgba(255,255,255,0.05);padding:32px 24px;text-align:center;font-size:0.875rem;color:#334155;">
+    <div style="max-width:960px;margin:0 auto;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;">
+      <span style="font-family:'JetBrains Mono',monospace;color:#475569;">🦡 tayra</span>
+      <span>MIT License &middot; Made with &#10084;&#65039; and Rust</span>
+      <div style="display:flex;gap:16px;">
+        <a href="https://github.com/iamkorun/tayra" style="color:#475569;text-decoration:none;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#475569'">GitHub</a>
+        <a href="https://crates.io/crates/tayra"    style="color:#475569;text-decoration:none;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#475569'">crates.io</a>
+        <a href="https://buymeacoffee.com/iamkorun" style="color:#475569;text-decoration:none;" onmouseover="this.style.color='#fbbf24'" onmouseout="this.style.color='#475569'">☕ Coffee</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    function copyInstall() {
+      const text = document.getElementById('install-cmd').textContent.trim();
+      const btn   = document.getElementById('copy-install-btn');
+      const label = document.getElementById('copy-label');
+
+      navigator.clipboard.writeText(text).then(function() {
+        btn.classList.add('copied');
+        label.textContent = 'copied!';
+        setTimeout(function() {
+          btn.classList.remove('copied');
+          label.textContent = 'copy';
+        }, 2000);
+      });
+    }
+
+    // Scroll reveal
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.12 });
+
+    document.querySelectorAll('.scroll-reveal').forEach(function(el) {
+      observer.observe(el);
+    });
+  </script>
+</body>
+</html>
