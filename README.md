@@ -145,6 +145,47 @@ Breakdown: 1 feat → minor
 Tag 'v1.3.0' created at HEAD.
 ```
 
+### Preview the tag without creating it (`--dry-run`)
+
+Combine `--tag` with `--dry-run` to see exactly what tag would be created, without touching your git refs:
+
+```sh
+$ tayra --tag --dry-run
+tayra v0.1.0
+━━━━━━━━━━━━━━━━━━━━━
+Current version: v1.2.3
+Suggested bump:  minor → v1.3.0
+...
+
+DRY RUN: would create tag 'v1.3.0' at HEAD.
+```
+
+Great for CI previews, PR comments, or just double-checking before you pull the trigger.
+
+### Verbose mode — highlight breaking changes
+
+Use `--verbose` (or `-v`) to mark breaking commits inline:
+
+```sh
+$ tayra --verbose
+...
+Commits since v1.4.2:
+  feat(api): add GraphQL endpoint
+  feat!: drop legacy REST v1  [BREAKING]
+  fix: correct rate limit calc
+
+Breakdown: 2 feat, 1 fix → major
+```
+
+### Quiet mode
+
+`--quiet` (or `-q`) is an alias for `--ci` — prints only the suggested version, nothing else:
+
+```sh
+$ tayra --quiet
+v1.5.0
+```
+
 ### Custom prefix
 
 ```sh
@@ -156,6 +197,8 @@ Current version: release-1.0.0
 Suggested bump:  patch → release-1.0.1
 ...
 ```
+
+`--prefix` accepts any string — `release-`, `rel/`, `v`, or even empty to strip a `v` prefix.
 
 ### Run against a different repository path
 
@@ -219,13 +262,13 @@ tayra uses [Conventional Commits](https://www.conventionalcommits.org/) to deter
 
 | Commit type | Bump |
 |-------------|------|
-| `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `ci:`, `style:`, `build:` | **patch** |
+| `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `ci:`, `perf:`, `style:`, `build:` | **patch** |
 | `feat:` | **minor** |
 | Any commit with `!` suffix or `BREAKING CHANGE:` in body | **major** |
 
 The highest bump level across all commits since the last tag wins.
 
-**Tag detection:** tayra auto-detects your tag prefix (e.g. `v` in `v1.2.3`, or none in `1.2.3`) and preserves it in the suggestion.
+**Tag detection:** tayra auto-detects your tag prefix (e.g. `v` in `v1.2.3`, or none in `1.2.3`) and preserves it in the suggestion. Prerelease and build-metadata suffixes like `v1.0.0-rc1` or `1.2.3+build.5` are parsed as their base version.
 
 ---
 
@@ -234,10 +277,12 @@ The highest bump level across all commits since the last tag wins.
 - Reads git history since the last semver tag automatically
 - Parses Conventional Commits — feat, fix, chore, docs, refactor, test, ci, perf, style, build
 - Detects breaking changes via `!` suffix or `BREAKING CHANGE:` in commit body
-- Auto-detects tag prefix (`v` or bare)
-- `--tag` flag creates the git tag for you
-- `--ci` flag outputs only the version string — perfect for scripts and pipelines
-- `--prefix` flag overrides the tag prefix
+- Auto-detects tag prefix (`v`, bare, or any custom prefix like `release-`)
+- Parses prerelease and build-metadata suffixes (`v1.0.0-rc1`, `1.2.3+build.5`)
+- `--tag` creates the git tag for you (combine with `--dry-run` to preview)
+- `--ci` / `--quiet` (`-q`) outputs only the version string — perfect for scripts and pipelines
+- `--verbose` (`-v`) marks breaking commits inline in the output
+- `--prefix` accepts any custom prefix
 - `--path` flag for running against a different repository
 - No config file — works with zero setup
 - Pure Rust, single binary, blazing fast
