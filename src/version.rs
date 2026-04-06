@@ -71,8 +71,15 @@ impl FromStr for SemVer {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
         let s = s.strip_prefix('v').unwrap_or(s);
-        let parts: Vec<&str> = s.split('.').collect();
+
+        // Strip build metadata ("+...") and prerelease ("-...") — we only compare
+        // the major/minor/patch triple. Prerelease ordering is intentionally not
+        // modeled: tayra's goal is the next stable bump, not prerelease math.
+        let core = s.split(['-', '+']).next().unwrap_or(s);
+
+        let parts: Vec<&str> = core.split('.').collect();
         if parts.len() != 3 {
             return Err(ParseError::InvalidFormat);
         }
@@ -148,6 +155,42 @@ mod tests {
         assert!("abc".parse::<SemVer>().is_err());
         assert!("1.2".parse::<SemVer>().is_err());
         assert!("1.2.3.4".parse::<SemVer>().is_err());
+    }
+
+    #[test]
+    fn parse_semver_with_prerelease() {
+        assert_eq!(
+            "v1.2.3-rc1".parse::<SemVer>().unwrap(),
+            SemVer::new(1, 2, 3)
+        );
+        assert_eq!(
+            "1.0.0-beta.2".parse::<SemVer>().unwrap(),
+            SemVer::new(1, 0, 0)
+        );
+        assert_eq!(
+            "v2.0.0-alpha".parse::<SemVer>().unwrap(),
+            SemVer::new(2, 0, 0)
+        );
+    }
+
+    #[test]
+    fn parse_semver_with_build_metadata() {
+        assert_eq!(
+            "1.2.3+build.123".parse::<SemVer>().unwrap(),
+            SemVer::new(1, 2, 3)
+        );
+        assert_eq!(
+            "v1.0.0-rc1+exp.sha.5114f85".parse::<SemVer>().unwrap(),
+            SemVer::new(1, 0, 0)
+        );
+    }
+
+    #[test]
+    fn parse_semver_with_whitespace() {
+        assert_eq!(
+            "  v1.2.3  ".parse::<SemVer>().unwrap(),
+            SemVer::new(1, 2, 3)
+        );
     }
 
     #[test]

@@ -3,33 +3,41 @@ use crate::git_ops::AnalysisResult;
 use crate::version::{BumpLevel, SemVer};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const SEPARATOR: &str = "━━━━━━━━━━━━━━━━━━━━━";
 
-/// Format the full human-readable output.
-pub fn format_full(result: &AnalysisResult, prefix: &str) -> String {
+/// Compute (bump_level, suggested_version) for an analysis result.
+///
+/// Rules:
+/// - No commits → patch bump from current (or 0.0.0 → 0.0.1).
+/// - Current == 0.0.0 and any non-breaking commits → minor bump (0.0.0 → 0.1.0).
+/// - Otherwise → highest bump level across commits.
+fn compute_bump_and_version(result: &AnalysisResult) -> (BumpLevel, SemVer) {
     let current = result
         .current_version
         .as_ref()
         .map(|vt| vt.version.clone())
         .unwrap_or_else(SemVer::zero);
 
-    let bump = if result.commits.is_empty() {
-        BumpLevel::Patch
+    if result.commits.is_empty() {
+        return (BumpLevel::Patch, current.bump(BumpLevel::Patch));
+    }
+
+    let raw_bump = compute_bump(&result.commits);
+
+    // Special case: 0.0.0 → 0.1.0 when the raw bump is patch.
+    // (Breaking or feat commits would already push to minor/major.)
+    let effective_bump = if current == SemVer::zero() && raw_bump == BumpLevel::Patch {
+        BumpLevel::Minor
     } else {
-        compute_bump(&result.commits)
+        raw_bump
     };
 
-    // Special case: if current is 0.0.0 and there are feat commits, suggest 0.1.0
-    let suggested = if current == SemVer::zero() && !result.commits.is_empty() {
-        let raw_bump = compute_bump(&result.commits);
-        if raw_bump == BumpLevel::Patch {
-            current.bump(BumpLevel::Minor)
-        } else {
-            current.bump(raw_bump)
-        }
-    } else {
-        current.bump(bump)
-    };
+    (effective_bump, current.bump(effective_bump))
+}
 
+/// Format the full human-readable output.
+pub fn format_full(result: &AnalysisResult, prefix: &str, verbose: bool) -> String {
+    let (bump, suggested) = compute_bump_and_version(result);
     let formatted_suggested = format!("{prefix}{suggested}");
     let current_display = match &result.current_version {
         Some(vt) => vt.tag_name.clone(),
@@ -38,25 +46,27 @@ pub fn format_full(result: &AnalysisResult, prefix: &str) -> String {
 
     let mut output = String::new();
     output.push_str(&format!("tayra v{VERSION}\n"));
-    output.push_str("\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\n");
+    output.push_str(SEPARATOR);
+    output.push('\n');
     output.push_str(&format!("Current version: {current_display}\n"));
     output.push_str(&format!(
-        "Suggested bump:  {bump} \u{2192} {formatted_suggested}\n"
+        "Suggested bump:  {bump} → {formatted_suggested}\n"
     ));
 
     if !result.commits.is_empty() {
-        output.push_str(&format!("\nCommits since {}:\n", current_display));
+        output.push_str(&format!("\nCommits since {current_display}:\n"));
         for commit in &result.commits {
             let summary = commit.summary().trim_end();
-            output.push_str(&format!("  {summary}\n"));
+            if verbose && commit.is_breaking {
+                output.push_str(&format!("  {summary}  [BREAKING]\n"));
+            } else {
+                output.push_str(&format!("  {summary}\n"));
+            }
         }
 
         let counts = count_by_type(&result.commits);
         let breakdown: Vec<String> = counts.iter().map(|(t, c)| format!("{c} {t}")).collect();
-        output.push_str(&format!(
-            "\nBreakdown: {} \u{2192} {bump}\n",
-            breakdown.join(", ")
-        ));
+        output.push_str(&format!("\nBreakdown: {} → {bump}\n", breakdown.join(", ")));
     } else {
         output.push_str("\nNo new commits since last tag.\n");
     }
@@ -66,50 +76,13 @@ pub fn format_full(result: &AnalysisResult, prefix: &str) -> String {
 
 /// Format the CI-friendly output (just the version string).
 pub fn format_ci(result: &AnalysisResult, prefix: &str) -> String {
-    let current = result
-        .current_version
-        .as_ref()
-        .map(|vt| vt.version.clone())
-        .unwrap_or_else(SemVer::zero);
-
-    let suggested = if result.commits.is_empty() {
-        current.bump(BumpLevel::Patch)
-    } else if current == SemVer::zero() {
-        let raw_bump = compute_bump(&result.commits);
-        if raw_bump == BumpLevel::Patch {
-            current.bump(BumpLevel::Minor)
-        } else {
-            current.bump(raw_bump)
-        }
-    } else {
-        current.bump(compute_bump(&result.commits))
-    };
-
+    let (_, suggested) = compute_bump_and_version(result);
     format!("{prefix}{suggested}")
 }
 
 /// Compute the suggested next version.
 pub fn compute_suggested(result: &AnalysisResult) -> SemVer {
-    let current = result
-        .current_version
-        .as_ref()
-        .map(|vt| vt.version.clone())
-        .unwrap_or_else(SemVer::zero);
-
-    if result.commits.is_empty() {
-        return current.bump(BumpLevel::Patch);
-    }
-
-    if current == SemVer::zero() {
-        let raw_bump = compute_bump(&result.commits);
-        if raw_bump == BumpLevel::Patch {
-            current.bump(BumpLevel::Minor)
-        } else {
-            current.bump(raw_bump)
-        }
-    } else {
-        current.bump(compute_bump(&result.commits))
-    }
+    compute_bump_and_version(result).1
 }
 
 #[cfg(test)]
@@ -166,7 +139,7 @@ mod tests {
     #[test]
     fn full_output_contains_header() {
         let result = make_result(Some("v1.0.0"), &["feat: new thing"]);
-        let output = format_full(&result, "v");
+        let output = format_full(&result, "v", false);
         assert!(output.contains("tayra v"));
         assert!(output.contains("Current version: v1.0.0"));
         assert!(output.contains("minor"));
@@ -176,8 +149,38 @@ mod tests {
     #[test]
     fn full_output_no_commits() {
         let result = make_result(Some("v1.0.0"), &[]);
-        let output = format_full(&result, "v");
+        let output = format_full(&result, "v", false);
         assert!(output.contains("No new commits"));
+    }
+
+    #[test]
+    fn full_output_verbose_marks_breaking() {
+        let result = make_result(Some("v1.0.0"), &["feat!: drop old api"]);
+        let output = format_full(&result, "v", true);
+        assert!(output.contains("[BREAKING]"));
+    }
+
+    #[test]
+    fn full_output_non_verbose_no_breaking_marker() {
+        let result = make_result(Some("v1.0.0"), &["feat!: drop old api"]);
+        let output = format_full(&result, "v", false);
+        assert!(!output.contains("[BREAKING]"));
+    }
+
+    #[test]
+    fn compute_bump_and_version_no_tag_no_commits() {
+        let result = make_result(None, &[]);
+        let (bump, ver) = compute_bump_and_version(&result);
+        assert_eq!(bump, BumpLevel::Patch);
+        assert_eq!(ver, SemVer::new(0, 0, 1));
+    }
+
+    #[test]
+    fn compute_bump_and_version_zero_with_breaking_is_major() {
+        let result = make_result(None, &["feat!: breaking"]);
+        let (bump, ver) = compute_bump_and_version(&result);
+        assert_eq!(bump, BumpLevel::Major);
+        assert_eq!(ver, SemVer::new(1, 0, 0));
     }
 
     #[test]
